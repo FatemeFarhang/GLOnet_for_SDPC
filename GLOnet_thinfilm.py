@@ -6,7 +6,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from TMM import *
 from tqdm import tqdm
-from net import Generator, ResGenerator
+# from net import Generator, ResGenerator
+from net import ResGenerator
+
 
 class GLOnet():
     def __init__(self, params):
@@ -18,10 +20,10 @@ class GLOnet():
             self.dtype = torch.FloatTensor
             
         # construct
-        if params.net == 'Res':
-            self.generator = ResGenerator(params)
-        else:
-            self.generator = Generator(params)
+        # if params.net == 'Res':
+        self.generator = ResGenerator(params)
+        # else:
+        #     self.generator = Generator(params)
         
         if self.cuda: 
             self.generator.cuda()
@@ -42,7 +44,7 @@ class GLOnet():
         if params.user_define:
             self.n_database = params.n_database
         else:
-            self.materials = params.materials
+            # self.materials = params.materials
             self.matdatabase = params.matdatabase
 
         self.n_bot = params.n_bot.type(self.dtype)  # number of frequencies or 1
@@ -52,11 +54,19 @@ class GLOnet():
         self.pol = params.pol # str of pol
         self.target_reflection = params.target_reflection.type(self.dtype) 
         # 1 x number of frequencies x number of angles x (number of pol or 1)
+        #--------my alteration--------#
+        self.thicknesses = params.thicknesses.type(self.dtype)
+        self.refractive_indices = params.n_database.type(self.dtype)
+
         
         # tranining history
         self.loss_training = []
-        self.refractive_indices_training = []
-        self.thicknesses_training = []
+        # self.refractive_indices_training = []
+        # self.thicknesses_training = []
+        self.m_training = []
+        self.n_training = []
+        self.b_training = []
+
         
         
     def train(self):
@@ -72,7 +82,7 @@ class GLOnet():
                 normIter = it / self.numIter
 
                 # discretizaton coeff.
-                self.update_alpha(normIter)
+                # self.update_alpha(normIter)
                 
                 # terminate the loop
                 if it > self.numIter:
@@ -81,28 +91,34 @@ class GLOnet():
                 # sample z
                 z = self.sample_z(self.batch_size)
 
-                # generate a batch of iamges
-                thicknesses, refractive_indices, _ = self.generator(z, self.alpha)
+                # generate a batch of images
+                # thicknesses, refractive_indices, _ = self.generator(z, self.alpha)
+                m, n, b = self.generator(z)
+                # print(torch.round(m).int(), n)
 
-                # calculate efficiencies and gradients using EM solver
-                reflection = TMM_solver(thicknesses, refractive_indices, self.n_bot, self.n_top, self.k, self.theta, self.pol)
-               
-                # free optimizer buffer 
+                # # calculate efficiencies and gradients using EM solver
+                # # reflection = TMM_solver(thicknesses, refractive_indices, self.n_bot, self.n_top, self.k, self.theta, self.pol)
+                reflection = TMM_solver(m, n, b, self.thicknesses, self.refractive_indices, self.n_bot, self.n_top, self.k, self.theta, self.pol)
+                # print(reflection)
+                # # free optimizer buffer 
                 self.optimizer.zero_grad()
 
-                # construct the loss 
+                # # construct the loss 
+                reflection.requires_grad = True
                 g_loss = self.global_loss_function(reflection)
                 
                 
-                # record history
-                self.record_history(g_loss, thicknesses, refractive_indices)
+                # # record history
+                # # self.record_history(g_loss, thicknesses, refractive_indices)
+                self.record_history(g_loss, m, n, b)
+
                 
-                # train the generator
+                # # train the generator
                 g_loss.backward()
                 self.optimizer.step()
                 self.scheduler.step()
                 
-                # update progress bar
+                # # update progress bar
                 t.update()
     
     def evaluate(self, num_devices, kvector = None, inc_angles = None, pol = None, grayscale=True):
@@ -115,66 +131,73 @@ class GLOnet():
 
         self.generator.eval()
         z = self.sample_z(num_devices)
-        thicknesses, refractive_indices, P = self.generator(z, self.alpha)
-        result_mat = torch.argmax(P, dim=2).detach() # batch size x number of layer
+        # thicknesses, refractive_indices, P = self.generator(z, self.alpha)
+        m, n, b = self.generator(z)
+        # result_mat = torch.argmax(P, dim=2).detach() # batch size x number of layer
 
         if not grayscale:
             if self.user_define:
                 n_database = self.n_database # do not support dispersion
             else:
-                n_database = self.matdatabase.interp_wv(2 * math.pi/kvector, self.materials, True).unsqueeze(0).unsqueeze(0).type(self.dtype)
+                n_database = self.matdatabase.interp_wv(2 * math.pi/kvector)
             
-            one_hot = torch.eye(len(self.materials)).type(self.dtype)
-            ref_idx = torch.sum(one_hot[result_mat].unsqueeze(-1) * n_database, dim=2)
-        else:
-            if self.user_define:
-                ref_idx = refractive_indices
-            else:
-                n_database = self.matdatabase.interp_wv(2 * math.pi/kvector, self.materials, True).unsqueeze(0).unsqueeze(0).type(self.dtype)
-                ref_idx = torch.sum(P.unsqueeze(-1) * n_database, dim=2)
+        #     one_hot = torch.eye(len(self.materials)).type(self.dtype)
+        #     ref_idx = torch.sum(one_hot[result_mat].unsqueeze(-1) * n_database, dim=2)
+        # else:
+        #     if self.user_define:
+        #         ref_idx = refractive_indices
+        #     else:
+        #         n_database = self.matdatabase.interp_wv(2 * math.pi/kvector, self.materials, True).unsqueeze(0).unsqueeze(0).type(self.dtype)
+        #         ref_idx = torch.sum(P.unsqueeze(-1) * n_database, dim=2)
 
-        reflection = TMM_solver(thicknesses, ref_idx, self.n_bot, self.n_top, kvector.type(self.dtype), inc_angles.type(self.dtype), pol)
-        return (thicknesses, ref_idx, result_mat, reflection)
+        reflection = TMM_solver(m, n, b, self.thicknesses, n_database, self.n_bot, self.n_top, kvector.type(self.dtype), inc_angles.type(self.dtype), pol)
+        return (m, n, b, reflection)
     
-    def _TMM_solver(self, thicknesses, result_mat, kvector = None, inc_angles = None, pol = None):
-        if kvector is None:
-            kvector = self.k
-        if inc_angles is None:
-            inc_angles = self.theta
-        if pol is None:
-            pol = self.pol  
-        n_database = self.matdatabase.interp_wv(2 * math.pi/kvector, self.materials, True).unsqueeze(0).unsqueeze(0).type(self.dtype)
-        one_hot = torch.eye(len(self.materials)).type(self.dtype)
-        ref_idx = torch.sum(one_hot[result_mat].unsqueeze(-1) * n_database, dim=2)
-        reflection = TMM_solver(thicknesses, ref_idx, self.n_bot, self.n_top, kvector.type(self.dtype), inc_angles.type(self.dtype), pol)
-        return reflection
+    # def _TMM_solver(self, thicknesses, result_mat, kvector = None, inc_angles = None, pol = None):
+    #     if kvector is None:
+    #         kvector = self.k
+    #     if inc_angles is None:
+    #         inc_angles = self.theta
+    #     if pol is None:
+    #         pol = self.pol  
+    #     n_database = self.matdatabase.interp_wv(2 * math.pi/kvector, self.materials, True).unsqueeze(0).unsqueeze(0).type(self.dtype)
+    #     one_hot = torch.eye(len(self.materials)).type(self.dtype)
+    #     ref_idx = torch.sum(one_hot[result_mat].unsqueeze(-1) * n_database, dim=2)
+    #     reflection = TMM_solver(thicknesses, ref_idx, self.n_bot, self.n_top, kvector.type(self.dtype), inc_angles.type(self.dtype), pol)
+    #     return reflection
         
-    def update_alpha(self, normIter):
-        self.alpha = round(normIter/0.05) * self.alpha_sup + 1.
+    # def update_alpha(self, normIter):
+    #     self.alpha = round(normIter/0.05) * self.alpha_sup + 1.
         
     def sample_z(self, batch_size):
         return (torch.randn(batch_size, self.noise_dim, requires_grad=True)).type(self.dtype)
     
     def global_loss_function(self, reflection):
-        return -torch.mean(torch.exp(-torch.mean(torch.pow(reflection - self.target_reflection, 2), dim=(1,2,3))/self.sigma))
+        return -torch.mean(torch.exp(torch.mean(torch.pow((reflection - self.target_reflection),2),dim=(1))/self.sigma))
 
-    def global_loss_function_robust(self, reflection, thicknesses):
-        metric = torch.mean(torch.pow(reflection - self.target_reflection, 2), dim=(1,2,3))
-        dmdt = torch.autograd.grad(metric.mean(), thicknesses, create_graph=True)
-        return -torch.mean(torch.exp((-metric - self.robust_coeff *torch.mean(torch.abs(dmdt[0]), dim=1))/self.sigma))
 
-    def record_history(self, loss, thicknesses, refractive_indices):
-        self.loss_training.append(loss.detach())
-        self.thicknesses_training.append(thicknesses.mean().detach())
-        self.refractive_indices_training.append(refractive_indices.mean().detach())
+    # def global_loss_function_robust(self, reflection, thicknesses):
+        # metric = torch.mean(torch.pow(reflection - self.target_reflection, 2), dim=(1,2,3))
+        # dmdt = torch.autograd.grad(metric.mean(), thicknesses, create_graph=True)
+        # return -torch.mean(torch.exp((-metric - self.robust_coeff *torch.mean(torch.abs(dmdt[0]), dim=1))/self.sigma))
+
+    # def record_history(self, loss, thicknesses, refractive_indices):
+    def record_history(self, loss, m, n, b):
+        self.loss_training.append(loss.cpu().detach().numpy())
+        # self.thicknesses_training.append(thicknesses.mean().detach())
+        # self.refractive_indices_training.append(refractive_indices.mean().detach())
+        self.m_training.append(m.mean().detach())
+        self.n_training.append(n.mean().detach())
+        self.b_training.append(b.mean().detach())
+
         
     def viz_training(self):
-        plt.figure(figsize = (20, 5))
-        plt.subplot(131)
+        # plt.figure(figsize = (20, 5))
+        # plt.subplot(131)
         plt.plot(self.loss_training)
-        plt.ylabel('Loss', fontsize=18)
-        plt.xlabel('Iterations', fontsize=18)
-        plt.xticks(fontsize=14)
-        plt.yticks(fontsize=14)
+        plt.ylabel('Loss')
+        plt.xlabel('Iterations')
+        # plt.xticks(fontsize=14)
+        # plt.yticks(fontsize=14)
         
         

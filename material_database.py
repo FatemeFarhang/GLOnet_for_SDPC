@@ -25,11 +25,11 @@ class MatDatabase(object):
 				mat_database[self.material_key[i]] = (A[:, 0], A[:, 1], A[:, 2])
 			except NameError:
 				print('The material database does not contain', self.material_key[i])
-
 		return mat_database
 
 
-	def interp_wv(self, wv_in, material_key, ignoreloss = False):
+	# def interp_wv(self, wv_in, material_key, ignoreloss = False):
+	def interp_wv(self, wv_in):
 		'''
 			parameters
 				wv_in (tensor) : number of wavelengths
@@ -38,17 +38,22 @@ class MatDatabase(object):
 			return
 				refractive indices (tensor or tuple of tensor) : number of materials x number of wavelengths
 		'''
-		n_data = np.zeros((len(material_key), wv_in.size(0)))
-		k_data = np.zeros((len(material_key), wv_in.size(0)))
-		for i in range(len(material_key)):
-			mat = self.mat_database[material_key[i]]
-			n_data[i, :] = np.interp(wv_in, mat[0], mat[1])
-			k_data[i, :] = np.interp(wv_in, mat[0], mat[2])
 
-		if ignoreloss:
-			return torch.tensor(n_data)
-		else:
-			return (torch.tensor(n_data), torch.tensor(k_data))
+		n_data_L = np.zeros((1,wv_in.size(0)))
+		n_data_H = np.zeros((1,wv_in.size(0)))
+
+		n_data_D = np.zeros((1, wv_in.size(0)))
+		mat_sio = self.mat_database['SiO2']
+		mat_sin = self.mat_database['SiN']
+		n_data_L = np.interp(wv_in, mat_sio[0], mat_sio[1])
+		n_data_H = np.interp(wv_in, mat_sin[0], mat_sin[1])
+
+		n_data_D = np.interp(wv_in, mat_sio[0], mat_sio[1])
+		n_data = np.vstack((n_data_L,n_data_H, n_data_D))
+        
+		return torch.tensor(n_data).cuda() if torch.cuda.is_available() else torch.tensor(n_data)
+
+
 
 
 
