@@ -52,8 +52,7 @@ class GLOnet():
         self.k = params.k.type(self.dtype)  # number of frequencies
         self.theta = params.theta.type(self.dtype) # number of angles
         self.pol = params.pol # str of pol
-        self.target_reflection = params.target_reflection.type(self.dtype) 
-        # 1 x number of frequencies x number of angles x (number of pol or 1)
+        self.target_reflection = params.target_reflection.type(self.dtype) # 1 x number of frequencies x number of angles x (number of pol or 1)
         #--------my alteration--------#
         self.thicknesses = params.thicknesses.type(self.dtype)
         self.refractive_indices = params.n_database.type(self.dtype)
@@ -61,8 +60,6 @@ class GLOnet():
         
         # tranining history
         self.loss_training = []
-        # self.refractive_indices_training = []
-        # self.thicknesses_training = []
         self.m_training = []
         self.n_training = []
         self.b_training = []
@@ -82,7 +79,7 @@ class GLOnet():
                 normIter = it / self.numIter
 
                 # discretizaton coeff.
-                # self.update_alpha(normIter)
+                self.update_alpha(normIter)
                 
                 # terminate the loop
                 if it > self.numIter:
@@ -93,7 +90,7 @@ class GLOnet():
 
                 # generate a batch of images
                 # thicknesses, refractive_indices, _ = self.generator(z, self.alpha)
-                m, n, b = self.generator(z)
+                m, n, P, b = self.generator(z, self.alpha)
                 # print(torch.round(m).int(), n)
 
                 # # calculate efficiencies and gradients using EM solver
@@ -104,13 +101,13 @@ class GLOnet():
                 self.optimizer.zero_grad()
 
                 # # construct the loss 
-                reflection.requires_grad = True
+                reflection.requires_grad_()
                 g_loss = self.global_loss_function(reflection)
                 
                 
                 # # record history
                 # # self.record_history(g_loss, thicknesses, refractive_indices)
-                self.record_history(g_loss, m, n, b)
+                self.record_history(g_loss, m.float(), n.float(), b)
 
                 
                 # # train the generator
@@ -132,7 +129,7 @@ class GLOnet():
         self.generator.eval()
         z = self.sample_z(num_devices)
         # thicknesses, refractive_indices, P = self.generator(z, self.alpha)
-        m, n, b = self.generator(z)
+        m, n, P, b = self.generator(z, self.alpha)
         # result_mat = torch.argmax(P, dim=2).detach() # batch size x number of layer
 
         if not grayscale:
@@ -166,14 +163,14 @@ class GLOnet():
     #     reflection = TMM_solver(thicknesses, ref_idx, self.n_bot, self.n_top, kvector.type(self.dtype), inc_angles.type(self.dtype), pol)
     #     return reflection
         
-    # def update_alpha(self, normIter):
-    #     self.alpha = round(normIter/0.05) * self.alpha_sup + 1.
+    def update_alpha(self, normIter):
+        self.alpha = round(normIter/0.05) * self.alpha_sup + 1.
         
     def sample_z(self, batch_size):
         return (torch.randn(batch_size, self.noise_dim, requires_grad=True)).type(self.dtype)
     
     def global_loss_function(self, reflection):
-        return -torch.mean(torch.exp(torch.mean(torch.pow((reflection - self.target_reflection),2),dim=(1))/self.sigma))
+        return -torch.mean(torch.exp(-torch.mean(torch.pow((reflection - self.target_reflection),2),dim=(1))/self.sigma))
 
 
     # def global_loss_function_robust(self, reflection, thicknesses):

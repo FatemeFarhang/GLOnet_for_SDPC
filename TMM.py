@@ -130,27 +130,30 @@ def transfer_matrix_SDPC(m, n, b, thickness, refractive, k, ky, pol='TM'):
     # numfreq = k.size(0)
     T_batch = []
     # print(T_stack.device)
-    n_list = torch.round(n).int()
-    m_list = torch.round(m).int()
-    b_list = torch.round(b).int()
-    batch = n_list.size(0)
+    # n_list = torch.round(n).int()
+    # m_list = torch.round(m).int()
+    # b_list = torch.round(b).int()
+    batch = n.size(0)
     # thicknesses = thickness.view(-1, 1, 1, 1)
     # refractive_index = refractive.view(-1, numfreq, 1, 1)
     T_layer_D = transfer_matrix_layer(thickness[2], refractive[2], k, ky, pol)
     # print(b_list)
     for i in range(batch):
-        T_stack = torch.tensor([[1., 0.], [0., 1.]],dtype=torch.cfloat).cuda()
-        for j in range(n_list[i]+1):
-            T_layer_L = transfer_matrix_layer(thickness[0]*(1 + (j*b_list[i])*.2), refractive[0], k, ky, pol)
-            T_layer_H = transfer_matrix_layer(thickness[1]*(1 + (j*b_list[i])*.2), refractive[1], k, ky, pol)
+        if torch.cuda.is_available():
+            T_stack = torch.tensor([[1., 0.], [0., 1.]],dtype=torch.cfloat).cuda()
+        else:
+            T_stack = torch.tensor([[1., 0.], [0., 1.]],dtype=torch.cfloat)
+        for j in range(n[i]+1):
+            T_layer_L = transfer_matrix_layer(thickness[0]*(1 + (j*b[i])*.2), refractive[0], k, ky, pol)
+            T_layer_H = transfer_matrix_layer(thickness[1]*(1 + (j*b[i])*.2), refractive[1], k, ky, pol)
             # print(T_layer_L.size(), T_stack.size())
             # print(T_layer_L @ T_stack)
             T_stack = T_layer_L @ T_stack
             T_stack = T_layer_H @ T_stack
         T_stack = T_layer_D @ T_stack
-        for h in range(m_list[i]+1):
-            T_layer_L = transfer_matrix_layer(thickness[0]*(1 + (h*b_list[i])*.2), refractive[0], k, ky, pol)
-            T_layer_H = transfer_matrix_layer(thickness[1]*(1 + (h*b_list[i])*.2), refractive[1], k, ky, pol)
+        for h in range(m[i]+1):
+            T_layer_L = transfer_matrix_layer(thickness[0]*(1 + (h*b[i])*.2), refractive[0], k, ky, pol)
+            T_layer_H = transfer_matrix_layer(thickness[1]*(1 + (h*b[i])*.2), refractive[1], k, ky, pol)
             T_stack = T_layer_H @ T_stack
             T_stack = T_layer_L @ T_stack
         T_batch.append(T_stack)
@@ -200,7 +203,10 @@ def amp2field(refractive_index, k, ky, pol = 'TM'):
         pol_multiplier = torch.cat([TMpol, TEpol], dim = -1)
 
     m21 = -kx / k / pol_multiplier
-    ones = torch.ones(m21.size(0),2).cuda()
+    if torch.cuda.is_available():
+        ones = torch.ones(m21.size(0),2).cuda()
+    else:
+        ones = torch.ones(m21.size(0),2)
     return torch.hstack((ones, torch.vstack((m21, -m21)).T)).view(-1,2,2).type(torch.cfloat)
     # return ((1., 0), (1., 0.), (-kx / k / pol_multiplier, 0.), (kx / k / pol_multiplier, 0.))
 
