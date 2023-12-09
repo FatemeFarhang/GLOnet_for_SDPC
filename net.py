@@ -68,7 +68,7 @@ class ResGenerator(nn.Module):
         self.noise_dim = params.noise_dim
         self.res_layers = params.res_layers
         self.res_dim = params.res_dim
-        self.nums = params.nums.cuda()
+        self.nums = params.nums
         self.size = self.nums.shape[0]
         
         self.initBLOCK = nn.Sequential(

@@ -43,13 +43,17 @@ class MatDatabase(object):
 		n_data_H = np.zeros((1,wv_in.size(0)))
 
 		n_data_D = np.zeros((1, wv_in.size(0)))
+		n_data_M = np.zeros((1,wv_in.size(0)))
+
 		mat_sio = self.mat_database['SiO2']
 		mat_sin = self.mat_database['SiN']
+		mat_mos = self.mat_database['MoSe2']
 		n_data_L = np.interp(wv_in, mat_sio[0], mat_sio[1])
 		n_data_H = np.interp(wv_in, mat_sin[0], mat_sin[1])
 
 		n_data_D = np.interp(wv_in, mat_sio[0], mat_sio[1])
-		n_data = np.vstack((n_data_L,n_data_H, n_data_D))
+		n_data_M = np.interp(wv_in, mat_mos[0], mat_mos[1])
+		n_data = np.vstack((n_data_L,n_data_H, n_data_D, n_data_M))
         
 		return torch.tensor(n_data).cuda() if torch.cuda.is_available() else torch.tensor(n_data)
 
